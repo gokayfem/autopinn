@@ -92,8 +92,8 @@ def sample_initial(n=1000, device='cpu'):
 def sample_periodic_bc(n=500, device='cpu'):
     """Periodic BC: u(-1,t) = u(1,t) and u_x(-1,t) = u_x(1,t)."""
     t = torch.FloatTensor(n, 1).uniform_(*DOMAIN_T).to(device)
-    x_left  = torch.full((n, 1), DOMAIN_X[0], device=device).requires_grad_(True)
-    x_right = torch.full((n, 1), DOMAIN_X[1], device=device).requires_grad_(True)
+    x_left  = torch.full((n, 1), float(DOMAIN_X[0]), device=device).requires_grad_(True)
+    x_right = torch.full((n, 1), float(DOMAIN_X[1]), device=device).requires_grad_(True)
     return t, x_left, x_right
 
 
