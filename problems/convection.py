@@ -70,8 +70,8 @@ def sample_initial(n=500, device='cpu'):
 def sample_periodic_bc(n=200, device='cpu'):
     """Periodic BC: u(0,t) = u(2pi,t)."""
     t  = torch.FloatTensor(n, 1).uniform_(*DOMAIN_T).to(device)
-    x0 = torch.full((n, 1), DOMAIN_X[0], device=device)
-    x1 = torch.full((n, 1), DOMAIN_X[1], device=device)
+    x0 = torch.full((n, 1), float(DOMAIN_X[0]), device=device)
+    x1 = torch.full((n, 1), float(DOMAIN_X[1]), device=device)
     return t, x0, x1
 
 
