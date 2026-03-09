@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.uv/
+
+# Experiment artifacts
+run.log
+results.tsv
+progress.png
+sessions/
+
+# Agent prompt files (generated per-session)
+CLAUDE.md
+SETUP.md
+
+# Jupyter
+.ipynb_checkpoints/
