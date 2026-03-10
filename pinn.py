@@ -70,14 +70,13 @@ class SubPINN(nn.Module):
     If hard IC is enabled: u(x,t) = IC(x) + t * NN(x,t)
     Otherwise: u(x,t) = NN(x,t)
     """
-    def __init__(self):
+    def __init__(self, width=64, depth=3):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(2, 64), nn.Tanh(),
-            nn.Linear(64, 64), nn.Tanh(),
-            nn.Linear(64, 64), nn.Tanh(),
-            nn.Linear(64, 1),
-        )
+        layers = [nn.Linear(2, width), nn.Tanh()]
+        for _ in range(depth - 1):
+            layers += [nn.Linear(width, width), nn.Tanh()]
+        layers.append(nn.Linear(width, 1))
+        self.net = nn.Sequential(*layers)
         self._ic_fn = None
 
     def set_ic(self, ic_fn):
@@ -135,7 +134,10 @@ def train():
         t_hi_w = t_boundaries[wi + 1]
         dt = t_hi_w - t_lo_w
 
-        sub_model = SubPINN().double().to(DEVICE)
+        if args.problem == 'allen_cahn':
+            sub_model = SubPINN(width=112, depth=2).double().to(DEVICE)
+        else:
+            sub_model = SubPINN(width=64, depth=3).double().to(DEVICE)
 
         # Set hard IC function (Allen-Cahn only)
         if USE_HARD_IC:
