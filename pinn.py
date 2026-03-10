@@ -129,7 +129,7 @@ def train():
         window_deadline = time.time() + time_per_window
 
         while time.time() < min(window_deadline, global_deadline):
-            n_pts = 3000
+            n_pts = 2000
             x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi).requires_grad_(True)
             t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1).requires_grad_(True)
 
@@ -145,7 +145,7 @@ def train():
             else:
                 # Use previous model's prediction at t_local=1 as IC
                 with torch.no_grad():
-                    t_prev_end = torch.ones(n_ic, 1, device=DEVICE)
+                    t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=torch.float64)
                     u_ic_true = models[-1](x_ic, t_prev_end)
 
             u_ic_pred = sub_model(x_ic, t_ic)
