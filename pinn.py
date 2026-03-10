@@ -70,9 +70,16 @@ class SubPINN(nn.Module):
     If hard IC is enabled: u(x,t) = IC(x) + t * NN(x,t)
     Otherwise: u(x,t) = NN(x,t)
     """
-    def __init__(self, width=64, depth=3):
+    def __init__(self, width=64, depth=3, fourier_freqs=None):
         super().__init__()
-        layers = [nn.Linear(2, width), nn.Tanh()]
+        # Input: [x, t] or [x, sin(k1*x), cos(k1*x), ..., t] if fourier
+        if fourier_freqs is not None:
+            self.freqs = fourier_freqs  # list of frequencies
+            in_dim = 1 + 2 * len(fourier_freqs) + 1  # x + fourier pairs + t
+        else:
+            self.freqs = None
+            in_dim = 2
+        layers = [nn.Linear(in_dim, width), nn.Tanh()]
         for _ in range(depth - 1):
             layers += [nn.Linear(width, width), nn.Tanh()]
         layers.append(nn.Linear(width, 1))
@@ -83,7 +90,16 @@ class SubPINN(nn.Module):
         self._ic_fn = ic_fn
 
     def forward(self, x, t):
-        raw = self.net(torch.cat([x, t], dim=1))
+        if self.freqs is not None:
+            feat = [x]
+            for k in self.freqs:
+                feat.append(torch.sin(k * x))
+                feat.append(torch.cos(k * x))
+            feat.append(t)
+            inp = torch.cat(feat, dim=1)
+        else:
+            inp = torch.cat([x, t], dim=1)
+        raw = self.net(inp)
         if self._ic_fn is not None:
             return self._ic_fn(x) + t * raw
         return raw
@@ -135,7 +151,8 @@ def train():
         dt = t_hi_w - t_lo_w
 
         if args.problem == 'allen_cahn':
-            sub_model = SubPINN(width=112, depth=2).double().to(DEVICE)
+            freqs = [math.pi, 2*math.pi, 4*math.pi, 8*math.pi]
+            sub_model = SubPINN(width=112, depth=2, fourier_freqs=freqs).double().to(DEVICE)
         else:
             sub_model = SubPINN(width=64, depth=3).double().to(DEVICE)
 
