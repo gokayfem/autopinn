@@ -56,13 +56,20 @@ else:
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 BUDGET_SECONDS = 180   # 3-minute wall-clock budget
 
+# Problem-specific settings
+USE_HARD_IC = (args.problem == 'allen_cahn')
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ARCHITECTURE
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SubPINN(nn.Module):
-    """Small MLP for a single time window."""
+    """Small MLP for a single time window.
+
+    If hard IC is enabled: u(x,t) = IC(x) + t * NN(x,t)
+    Otherwise: u(x,t) = NN(x,t)
+    """
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
@@ -71,10 +78,16 @@ class SubPINN(nn.Module):
             nn.Linear(64, 64), nn.Tanh(),
             nn.Linear(64, 1),
         )
+        self._ic_fn = None
+
+    def set_ic(self, ic_fn):
+        self._ic_fn = ic_fn
 
     def forward(self, x, t):
-        inp = torch.cat([x, t], dim=1)
-        return self.net(inp)
+        raw = self.net(torch.cat([x, t], dim=1))
+        if self._ic_fn is not None:
+            return self._ic_fn(x) + t * raw
+        return raw
 
 
 class PINN(nn.Module):
@@ -109,8 +122,7 @@ def train():
     else:
         x_lo, x_hi = -1.0, 1.0
 
-    # 5 time windows
-    n_windows = 5
+    n_windows = 3 if args.problem == 'allen_cahn' else 5
     t_boundaries = [i / n_windows for i in range(n_windows + 1)]
     time_per_window = BUDGET_SECONDS / n_windows
 
@@ -124,53 +136,69 @@ def train():
         dt = t_hi_w - t_lo_w
 
         sub_model = SubPINN().double().to(DEVICE)
+
+        # Set hard IC function (Allen-Cahn only)
+        if USE_HARD_IC:
+            if wi == 0:
+                if args.problem == 'convection':
+                    sub_model.set_ic(lambda x: torch.sin(x))
+                else:
+                    sub_model.set_ic(lambda x: x**2 * torch.cos(math.pi * x))
+            else:
+                prev = models[-1]
+                for p in prev.parameters():
+                    p.requires_grad_(False)
+                sub_model.set_ic(
+                    lambda x, _p=prev: _p(x, torch.ones(x.shape[0], 1, device=x.device, dtype=x.dtype))
+                )
+
         optimizer = torch.optim.Adam(sub_model.parameters(), lr=1e-3)
 
         window_deadline = time.time() + time_per_window
 
         while time.time() < min(window_deadline, global_deadline):
+            # Generate all sample points first (preserves RNG order)
             n_pts = 2000
             x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi).requires_grad_(True)
             t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1).requires_grad_(True)
-
-            n_ic = 300
-            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
-            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
-
-            if wi == 0:
-                if args.problem == 'convection':
-                    u_ic_true = torch.sin(x_ic).double()
-                else:
-                    u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
-            else:
-                # Use previous model's prediction at t_local=1 as IC
-                with torch.no_grad():
-                    t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=torch.float64)
-                    u_ic_true = models[-1](x_ic, t_prev_end)
-
-            u_ic_pred = sub_model(x_ic, t_ic)
-            loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
 
             n_bc = 100
             t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1)
             x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE, dtype=torch.float64).requires_grad_(True)
             x_right = torch.full((n_bc, 1), x_hi, device=DEVICE, dtype=torch.float64).requires_grad_(True)
+
+            # IC loss (soft IC for Convection only)
+            if not USE_HARD_IC:
+                n_ic = 300
+                x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
+                t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
+
+                if wi == 0:
+                    if args.problem == 'convection':
+                        u_ic_true = torch.sin(x_ic).double()
+                    else:
+                        u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
+                else:
+                    with torch.no_grad():
+                        t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=torch.float64)
+                        u_ic_true = models[-1](x_ic, t_prev_end)
+
+                u_ic_pred = sub_model(x_ic, t_ic)
+                loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
+
+            # Periodic BC
             u_left  = sub_model(x_left, t_bc)
             u_right = sub_model(x_right, t_bc)
             loss_bc = ((u_left - u_right)**2).mean()
 
-            # PDE residual: need to account for time scaling
-            # If t_real = t_lo + t_local * dt, then u_t_real = u_t_local / dt
-            # So PDE residual uses chain rule
+            # PDE residual
             u_f = sub_model(x_f, t_f)
-            # Compute derivatives wrt local coordinates
             u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
                                             create_graph=True)[0]
             u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
                                       create_graph=True)[0]
 
             if args.problem == 'convection':
-                # PDE: u_t + 50*u_x = 0, but u_t_real = u_t_local / dt
                 residual = u_t_local / dt + 50.0 * u_x
             else:
                 u_xx = torch.autograd.grad(u_x, x_f, grad_outputs=torch.ones_like(u_x),
@@ -179,7 +207,10 @@ def train():
 
             loss_pde = (residual**2).mean()
 
-            loss = 10.0 * loss_ic + loss_bc + loss_pde
+            if USE_HARD_IC:
+                loss = loss_bc + loss_pde
+            else:
+                loss = 10.0 * loss_ic + loss_bc + loss_pde
 
             optimizer.zero_grad()
             loss.backward()
