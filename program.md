@@ -34,7 +34,8 @@ experiments immediately. Do not wait for further permission.
 
 ## The Experiment Loop
 
-Each experiment runs on a single GPU with a fixed 3-minute wall-clock budget.
+Each experiment runs on the local GPU with a fixed 3-minute
+wall-clock budget.
 
 ```bash
 python pinn.py --problem convection   > run.log 2>&1   # fast idea validation
