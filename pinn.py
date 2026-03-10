@@ -104,16 +104,10 @@ class PINN(nn.Module):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def train():
-    model = PINN().to(DEVICE)
+    model = PINN().double().to(DEVICE)
 
-    # ── Optimizer ─────────────────────────────────────────────────────────────
-    # Known issue: Adam with equal LR for all loss terms causes gradient
-    # pathologies. The agent should try: separate LRs, L-BFGS, adaptive weights.
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    # ── Loss weights ───────────────────────────────────────────────────────────
-    # These are fixed equal weights — known to cause loss imbalance.
-    # The agent should try learnable weights, NTK-based weights, or annealing.
     w_pde = 1.0
     w_ic  = 1.0
     w_bc  = 1.0
@@ -123,34 +117,29 @@ def train():
 
     while time.time() < deadline:
 
-        # ── Sample collocation points ──────────────────────────────────────────
-        # Static uniform sampling — known weakness.
-        # Agent should try: adaptive resampling, importance sampling,
-        # time-causal ordering (sample earlier t more densely).
         x_f, t_f = sample_interior(n=5000, device=DEVICE)
+        x_f = x_f.double()
+        t_f = t_f.double()
 
-        # ── IC loss ────────────────────────────────────────────────────────────
         x_ic, t_ic, u_ic_true = sample_initial(n=500, device=DEVICE)
-        x_ic  = x_ic.requires_grad_(False)
-        t_ic  = t_ic.requires_grad_(False)
+        x_ic  = x_ic.double().requires_grad_(False)
+        t_ic  = t_ic.double().requires_grad_(False)
+        u_ic_true = u_ic_true.double()
         u_ic_pred = model(x_ic, t_ic)
         loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
 
-        # ── BC loss (periodic) ─────────────────────────────────────────────────
         t_bc, x_left, x_right = sample_periodic_bc(n=200, device=DEVICE)
-        u_left  = model(x_left.requires_grad_(True),  t_bc)
-        u_right = model(x_right.requires_grad_(True), t_bc)
+        t_bc = t_bc.double()
+        x_left  = x_left.double().requires_grad_(True)
+        x_right = x_right.double().requires_grad_(True)
+        u_left  = model(x_left, t_bc)
+        u_right = model(x_right, t_bc)
         loss_bc = ((u_left - u_right)**2).mean()
 
-        # ── PDE residual loss ──────────────────────────────────────────────────
         u_f   = model(x_f, t_f)
         res   = pde_residual(u_f, x_f, t_f)
         loss_pde = (res**2).mean()
 
-        # ── Total loss ─────────────────────────────────────────────────────────
-        # Equal weighting is the known bad baseline. Typical ratio after
-        # convergence: loss_ic >> loss_pde >> loss_bc — leading to BC being
-        # ignored. The agent should address this imbalance.
         loss = w_ic * loss_ic + w_bc * loss_bc + w_pde * loss_pde
 
         optimizer.zero_grad()
