@@ -152,7 +152,8 @@ def train():
                     lambda x, _p=prev: _p(x, torch.ones(x.shape[0], 1, device=x.device, dtype=x.dtype))
                 )
 
-        optimizer = torch.optim.Adam(sub_model.parameters(), lr=1e-3)
+        lr = 5e-3 if args.problem == 'allen_cahn' else 1e-3
+        optimizer = torch.optim.Adam(sub_model.parameters(), lr=lr)
 
         window_deadline = time.time() + time_per_window
 
