@@ -123,28 +123,25 @@ def train():
         t_hi_w = t_boundaries[wi + 1]
         dt = t_hi_w - t_lo_w
 
-        sub_model = SubPINN().to(DEVICE)
+        sub_model = SubPINN().double().to(DEVICE)
         optimizer = torch.optim.Adam(sub_model.parameters(), lr=1e-3)
 
         window_deadline = time.time() + time_per_window
 
         while time.time() < min(window_deadline, global_deadline):
             n_pts = 3000
-            # Sample in x × [0, 1] (normalized time within window)
-            x_f = torch.FloatTensor(n_pts, 1).uniform_(x_lo, x_hi).to(DEVICE).requires_grad_(True)
-            t_f = torch.FloatTensor(n_pts, 1).uniform_(0, 1).to(DEVICE).requires_grad_(True)
+            x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi).requires_grad_(True)
+            t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1).requires_grad_(True)
 
-            # IC for this window: at t_local=0
             n_ic = 300
-            x_ic = torch.FloatTensor(n_ic, 1).uniform_(x_lo, x_hi).to(DEVICE)
-            t_ic = torch.zeros(n_ic, 1, device=DEVICE)
+            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
+            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
 
             if wi == 0:
-                # True IC: u(x, 0)
                 if args.problem == 'convection':
-                    u_ic_true = torch.sin(x_ic)
+                    u_ic_true = torch.sin(x_ic).double()
                 else:
-                    u_ic_true = x_ic**2 * torch.cos(math.pi * x_ic)
+                    u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
             else:
                 # Use previous model's prediction at t_local=1 as IC
                 with torch.no_grad():
@@ -154,11 +151,10 @@ def train():
             u_ic_pred = sub_model(x_ic, t_ic)
             loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
 
-            # BC: periodic
             n_bc = 100
-            t_bc = torch.FloatTensor(n_bc, 1).uniform_(0, 1).to(DEVICE)
-            x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE).requires_grad_(True)
-            x_right = torch.full((n_bc, 1), x_hi, device=DEVICE).requires_grad_(True)
+            t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1)
+            x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE, dtype=torch.float64).requires_grad_(True)
+            x_right = torch.full((n_bc, 1), x_hi, device=DEVICE, dtype=torch.float64).requires_grad_(True)
             u_left  = sub_model(x_left, t_bc)
             u_right = sub_model(x_right, t_bc)
             loss_bc = ((u_left - u_right)**2).mean()
