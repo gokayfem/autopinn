@@ -160,10 +160,14 @@ def train():
         window_deadline = time.time() + time_per_window
 
         while time.time() < min(window_deadline, global_deadline):
-            # Generate all sample points first (preserves RNG order)
+            # Sample points (order matters for RNG reproducibility)
             n_pts = 2000
             x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi).requires_grad_(True)
             t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1).requires_grad_(True)
+
+            n_ic = 300
+            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
+            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
 
             n_bc = 100
             t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1)
@@ -172,10 +176,6 @@ def train():
 
             # IC loss (soft IC for Convection only)
             if not USE_HARD_IC:
-                n_ic = 300
-                x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
-                t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
-
                 if wi == 0:
                     if args.problem == 'convection':
                         u_ic_true = torch.sin(x_ic).double()
