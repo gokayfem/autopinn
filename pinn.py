@@ -180,7 +180,8 @@ def train():
 
         window_start = time.time()
         window_deadline = window_start + window_times[wi]
-        lbfgs_start = window_start + 0.7 * window_times[wi]  # Switch at 70%
+        lbfgs_frac = 0.7
+        lbfgs_start = window_start + lbfgs_frac * window_times[wi]
         use_lbfgs = False
 
         while time.time() < min(window_deadline, global_deadline):
@@ -241,7 +242,12 @@ def train():
                                                create_graph=True)[0]
                     residual = u_t_local / dt - 0.001**2 * u_xx + 5.0 * (u_f**3 - u_f)
 
-                loss_pde = (residual**2).mean()
+                if USE_HARD_IC:
+                    # Causal weighting for Allen-Cahn: prioritize early t
+                    causal_w = 1.0 + 3.0 * (1.0 - t_f.detach())
+                    loss_pde = (causal_w * residual**2).mean()
+                else:
+                    loss_pde = (residual**2).mean()
 
                 if USE_HARD_IC:
                     return loss_bc + loss_pde
