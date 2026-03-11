@@ -12,8 +12,6 @@ wheels/
 
 # Experiment artifacts
 run.log
-results.tsv
-progress.png
 sessions/
 
 # Agent prompt files (generated per-session)

@@ -1,0 +1,137 @@
+commit	problem	L2_error	status	description
+baseline	Convection	1.000000	keep	vanilla MLP 4×64 tanh, Adam lr=1e-3
+baseline	Allen-Cahn	0.500000	keep	vanilla MLP 4×64 tanh, Adam lr=1e-3
+1c0adb4	Convection	0.786296	keep	float64 precision
+847365d	Convection	0.110317	keep	5 time windows, 3-layer SubPINNs, float32
+9d67c29	Convection	0.079906	keep	5 time windows + float64
+b104f71	Convection	0.075198	keep	5 time windows + float64 + 2000 PDE pts
+9d67c29	Allen-Cahn	0.354734	keep	5 time windows + float64 (first test)
+exp-35	Allen-Cahn	0.306915	keep	3 time windows (60s each) + float64
+95f4b28	Allen-Cahn	0.102867	keep	hard IC enforcement + 3 windows
+164e709	Allen-Cahn	0.040394	keep	hard IC + lr=5e-3
+exp-ac5w	Allen-Cahn	0.143021	discard	5 windows + hard IC (too few steps)
+exp-1kpts	Allen-Cahn	0.186923	discard	1000 PDE pts (worse resolution)
+exp-dbc	Allen-Cahn	0.230800	discard	derivative BC (too expensive)
+exp-4win	Allen-Cahn	0.118632	discard	4 windows (too few steps/window)
+d9493b9	Allen-Cahn	0.019274	keep	2×112 network (fewer layers, wider)
+49c12a0	Allen-Cahn	0.014998	keep	+ Fourier features [π,2π,4π,8π]
+exp-w96	Allen-Cahn	0.008208	keep	width=96 + Fourier
+exp-lbfgs	Convection	0.053151	keep	Adam→L-BFGS 70/30 + lr=3e-3
+66bb041	Allen-Cahn	0.007758	keep	+ Adam→L-BFGS 70/30
+66bb041	Convection	0.053151	keep	Adam→L-BFGS 70/30 + lr=3e-3
+8224a14	Allen-Cahn	0.005509	keep	+ causal loss weighting (1+3(1-t))
+9c057bd	Allen-Cahn	0.004435	keep	+ fixed L-BFGS collocation points
+9c057bd	Convection	0.043920	keep	+ fixed L-BFGS collocation points
+11080d6	Allen-Cahn	0.003196	keep	50/50 Adam/L-BFGS split
+11080d6	Convection	0.024327	keep	50/50 Adam/L-BFGS split
+exp-expw5	Allen-Cahn	0.003749	discard	exp(5) causal too aggressive
+exp-16pi	Allen-Cahn	0.003051	discard	16π Fourier freq (more dims, fewer steps)
+exp-gclip	Allen-Cahn	0.003129	discard	gradient clipping (fewer steps)
+04dde99	Allen-Cahn	0.002270	keep	exp(3) causal + cosine LR annealing
+exp-lr50	Allen-Cahn	0.003582	discard	cosine eta_min=lr/50 too aggressive
+exp-lr5	Allen-Cahn	0.003427	discard	cosine eta_min=lr/5 too gentle
+exp-4060	Allen-Cahn	0.002317	discard	40/60 split (no improvement)
+exp-6040	Allen-Cahn	0.003667	discard	60/40 split (too much Adam)
+exp-mmlp	Allen-Cahn	0.004525	discard	modified MLP input concat (slow)
+exp-wd	Allen-Cahn	0.005785	discard	weight decay 1e-5 (slower)
+exp-1500	Allen-Cahn	0.003750	discard	1500 PDE pts (less resolution)
+exp-nuw1	Allen-Cahn	0.003758	discard	non-uniform windows [0,.5,.75,1]
+exp-nuw2	Allen-Cahn	0.010541	discard	non-uniform windows [0,.4,.7,1]
+exp-acausal	Allen-Cahn	0.233930	discard	adaptive causal (broken impl)
+exp-lbfgs40	Allen-Cahn	0.003348	discard	L-BFGS max_iter=40 (fewer steps)
+exp-bc10	Allen-Cahn	0.005066	discard	BC weight 10 (too much)
+exp-bc01	Allen-Cahn	0.004466	discard	BC weight 0.1 (too little)
+exp-ws	Allen-Cahn	0.004269	discard	warm-start from prev window (conflicting IC)
+exp-7win	Convection	0.028583	discard	7 windows (fewer steps per window)
+exp-ffconv	Convection	0.915374	discard	Fourier features [1,2,4] (catastrophic)
+exp-cosconv	Convection	0.112695	discard	cosine LR for Convection (too aggressive)
+exp-ic50	Convection	0.070187	discard	IC weight 50 (starves PDE)
+exp-ic5	Convection	0.022421	discard	IC weight 5 (slightly better than 10)
+exp-ic3	Convection	0.030198	discard	IC weight 3 (too little)
+d22a571	Convection	0.018474	keep	IC weight 7 (best balance)
+exp-causalconv	Convection	0.896955	discard	exp(3) causal for Convection (catastrophic)
+exp-singleconv	Convection	0.905280	discard	single-model hard IC (catastrophic)
+exp-bc200	Convection	0.034119	discard	200 BC points (overhead)
+exp-bc50	Convection	0.046590	discard	50 BC points (too few)
+exp-w80conv	Convection	0.055224	discard	width=80 (slower)
+exp-6win48	Convection	0.040077	discard	6 windows 48-wide (IC error accumulation)
+exp-lr5conv	Convection	0.037183	discard	lr=5e-3 (worse)
+exp-lr2conv	Convection	0.024104	discard	lr=2e-3 (no improvement)
+exp-tff	Convection	0.042204	discard	temporal Fourier [10,20] (overhead)
+exp-ic500	Convection	0.044439	discard	500 IC points (overhead)
+exp-96x2conv	Convection	0.138924	discard	96x2 arch (too shallow)
+exp-48x4conv	Convection	0.060494	discard	48x4 arch (too deep)
+exp-w72conv	Convection	0.031391	discard	72-wide (slower)
+exp-ffmatch	Convection	0.027182	discard	matched x+t Fourier (overhead)
+exp-lbfgs40	Allen-Cahn	0.003348	discard	L-BFGS max_iter=40
+exp-hist100	Allen-Cahn	0.005010	discard	L-BFGS history=100 (slower)
+exp-silu	Allen-Cahn	0.007145	discard	SiLU activation (slower)
+exp-gelu	Allen-Cahn	0.003280	discard	GELU activation (slightly worse)
+exp-nobc	Allen-Cahn	0.004423	discard	no BC loss (BC needed)
+exp-bclbfgs	Allen-Cahn	0.003763	discard	BC only during L-BFGS
+exp-2win	Allen-Cahn	0.005400	discard	2 windows (dt too large)
+exp-xavier	Allen-Cahn	0.005818	discard	Xavier init (different RNG)
+exp-compile	Allen-Cahn	0.000000	crash	torch.compile (incompatible with create_graph)
+exp-rff	Allen-Cahn	0.004300	discard	random Fourier features (overhead)
+exp-warmup	Allen-Cahn	0.003930	discard	LR warmup (slower early convergence)
+exp-rampw	Allen-Cahn	0.007490	discard	ramped causal weight (time.time overhead)
+exp-nualloc	Allen-Cahn	0.004893	discard	non-uniform Adam/LBFGS allocation
+exp-acausal2	Allen-Cahn	0.002675	discard	adaptive causal weighting vectorized (overhead)
+exp-resblock	Allen-Cahn	0.004034	discard	ResBlock depth=4 width=64 (slow)
+c4bf9f1	Convection	0.001137	keep	SpectralPINN n_modes=1 w=32 d=2 t_freqs=[50]
+exp-spec4	Convection	0.002893	discard	SpectralPINN n_modes=4 (unnecessary modes)
+exp-spec200	Convection	0.099050	discard	SpectralPINN n_pts=200 (too few)
+exp-speclr10	Convection	0.003422	discard	SpectralPINN lr=1e-2 (too high)
+exp-speclr5	Convection	0.005012	discard	SpectralPINN lr=5e-3 (too high)
+exp-speccos	Convection	0.003079	discard	SpectralPINN + cosine LR (too aggressive)
+exp-specw64	Convection	0.002373	discard	SpectralPINN width=64 (slower)
+exp-spec3070	Convection	0.001847	discard	SpectralPINN 30/70 split (too much LBFGS)
+exp-spec7030	Convection	0.002304	discard	SpectralPINN 70/30 split (too much Adam)
+exp-speclbfgs	Convection	0.003520	discard	SpectralPINN LBFGS-only (too slow)
+exp-specadam	Convection	0.036510	discard	SpectralPINN Adam-only (no refinement)
+exp-spectf	Convection	0.003816	discard	SpectralPINN t_freqs=[50,100] (overhead)
+exp-specsoftic	Convection	0.001173	discard	SpectralPINN soft IC (similar to hard IC)
+exp-specmi50	Convection	0.001759	discard	SpectralPINN LBFGS max_iter=50 (slower)
+d8fa754	Convection	0.000841	keep	SpectralPINN n_pts=750 (sweet spot)
+exp-spec700	Convection	0.000863	discard	SpectralPINN n_pts=700 (close)
+exp-spec800	Convection	0.001607	discard	SpectralPINN n_pts=800 (variance)
+exp-specmi50	Convection	0.001759	discard	SpectralPINN LBFGS max_iter=50 (slower)
+exp-specd3	Convection	0.001422	discard	SpectralPINN depth=3 (slower)
+exp-specsplit	Convection	0.001084	discard	SpectralPINN 500/1000 Adam/LBFGS split
+exp-specgrid	Convection	0.159964	discard	SpectralPINN structured grid (catastrophic)
+exp-w64ac	Allen-Cahn	0.005830	discard	width=64 (slow instance)
+exp-3freq	Allen-Cahn	0.002979	discard	3 Fourier freqs [π,2π,4π] (less info)
+exp-2freq	Allen-Cahn	0.004499	discard	2 Fourier freqs [π,4π] (worse)
+exp-curreps	Allen-Cahn	0.005603	discard	curriculum ε=0.003→0.001 (no improvement)
+183f4a0	Convection	0.000001	keep	CharacteristicPINN u=a*cos(ξ)+b*sin(ξ), ξ=x-50t
+exp-siren	Allen-Cahn	1.006339	discard	SIREN omega=30 (catastrophic)
+exp-warmrestart	Allen-Cahn	0.003902	discard	CosineAnnealingWarmRestarts T_0=300
+exp-d1w192	Allen-Cahn	0.007073	discard	depth=1 width=192 (too shallow)
+exp-tempcurr	Allen-Cahn	0.003501	discard	temporal curriculum sampling [0,0.3]→[0,1]
+exp-causal15	Allen-Cahn	0.004026	discard	exp(1.5) causal (too gentle)
+61459ec	Allen-Cahn	0.001475	keep	Full FD + torch.compile (8635 steps, beats Causal PINN)
+exp-4win-fd	Allen-Cahn	0.001778	discard	4 windows + compile+FD (overhead)
+exp-w128-fd	Allen-Cahn	0.002316	discard	width=128 + compile+FD (slower)
+exp-fwddiff	Allen-Cahn	0.002030	discard	forward difference u_t (O(h) inaccurate)
+exp-ht002	Allen-Cahn	0.001822	discard	h_t=0.002 (coarser FD)
+exp-ht0005	Allen-Cahn	0.002135	discard	h_t=0.0005 (overhead)
+exp-hx01	Allen-Cahn	0.001524	discard	h_x=0.01 (close but worse)
+exp-tmax1500	Allen-Cahn	0.001796	discard	cosine T_max=1500 (too slow decay)
+exp-tmax500	Allen-Cahn	0.003071	discard	cosine T_max=500 + slow instance
+exp-2500pts	Allen-Cahn	0.002234	discard	2500 PDE pts (overhead)
+exp-1500pts	Allen-Cahn	0.002684	discard	1500 PDE pts + slow instance
+exp-lr8	Allen-Cahn	0.001946	discard	lr=8e-3 (overshoots)
+exp-lr3	Allen-Cahn	0.002922	discard	lr=3e-3 (too slow convergence)
+exp-4060fd	Allen-Cahn	0.001887	discard	40/60 Adam/LBFGS split
+exp-6040fd	Allen-Cahn	0.002703	discard	60/40 split + slow instance
+exp-nocausal	Allen-Cahn	0.003417	discard	no causal weighting (needed)
+exp-tff-ac	Allen-Cahn	0.003030	discard	temporal Fourier [π,2π,4π] (overhead)
+exp-16pi-fd	Allen-Cahn	0.002073	discard	16π freq + compile (marginal)
+exp-romode	Allen-Cahn	0.001645	discard	reduce-overhead compile mode
+exp-maxauto	Allen-Cahn	0.000000	crash	max-autotune compile (CUDA graph issue)
+exp-hybrid	Allen-Cahn	0.000000	crash	autograd u_t + FD u_xx + compile (donated buffer)
+exp-lbfgs10	Allen-Cahn	0.002188	discard	L-BFGS max_iter=10
+exp-lbfgs30	Allen-Cahn	0.002577	discard	L-BFGS max_iter=30
+exp-batch5	Allen-Cahn	0.001931	discard	batched 5-point FD forward (marginal)
+exp-jvp	Allen-Cahn	0.009967	discard	JVP u_t + compile (1211 steps, too slow)
+exp-jvpnc	Allen-Cahn	0.005944	discard	JVP u_t no compile (3063 steps, slow)

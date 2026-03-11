@@ -23,10 +23,28 @@ of the Python files like you normally would as a researcher. Instead, you are
 programming the `program.md` Markdown file that provides context to the AI
 agent and sets up your autonomous research loop.
 
+## Progress
+
+![AutoPINN Progress](progress.png)
+
+**136 experiments. 27 kept improvements. 2 sessions.**
+
+| Problem | Baseline | Best | SOTA | Method |
+|---------|----------|------|------|--------|
+| **Allen-Cahn** | 0.500 | **0.00148** | 3.26e-06 | torch.compile + FD residuals, hard IC, causal weighting, Fourier features |
+| **Convection** | 1.000 | **0.000001** | ~1e-04 | Characteristic PINN: u = a cos(x-50t) + b sin(x-50t) |
+
+Convection is solved — the characteristic coordinate transform makes the PDE
+trivially exact. Allen-Cahn went from complete failure (0.50) to beating the
+Causal PINN paper (1.51e-03) in ~100 experiments. The full experiment log is
+in `results.tsv`.
+
+## How it works
+
 Three files that matter:
 
 ```
-pinn.py      — the model, optimizer, and training loop (~170 lines). The agent edits this.
+pinn.py      — the model, optimizer, and training loop (~370 lines). The agent edits this.
 program.md   — agent instructions + experiment log. The human edits this.
 problems/    — PDE definitions, samplers, evaluators. Fixed. Do not modify.
 ```
@@ -114,6 +132,20 @@ Each kept experiment is a commit. The git log becomes the research record.
 ```bash
 git checkout -b autopinn/$(date +%b%d | tr '[:upper:]' '[:lower:]')
 ```
+
+## What the agent discovered
+
+Key techniques found autonomously, in order of discovery:
+
+1. **float64 precision** — L-BFGS in float32 converges prematurely near machine epsilon
+2. **Time-domain decomposition** — 3 sequential windows solve the causality violation
+3. **Hard IC enforcement** — u(x,t) = IC(x) + t·NN(x,t) eliminates the IC loss entirely
+4. **Fourier input features** — [sin(kx), cos(kx)] for k ∈ {π, 2π, 4π, 8π} breaks spectral bias
+5. **Adam → L-BFGS switching** — Adam explores, L-BFGS refines (50/50 time split)
+6. **Exponential causal weighting** — exp(3(1-t)) prioritizes early-time PDE residual
+7. **Cosine LR annealing** — smooth decay from 5e-3 to 5e-4 during Adam phase
+8. **Characteristic PINN** — for Convection, encode u = a·cos(ξ) + b·sin(ξ) where ξ = x - 50t
+9. **torch.compile + finite differences** — replace autograd with FD for PDE derivatives, enabling compilation and 63% more steps
 
 ## Design notes
 
