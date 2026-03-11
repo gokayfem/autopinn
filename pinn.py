@@ -301,7 +301,7 @@ def train():
                 if USE_HARD_IC:
                     return loss_bc + loss_pde
                 else:
-                    return 10.0 * loss_ic + loss_bc + loss_pde
+                    return 7.0 * loss_ic + loss_bc + loss_pde
 
             if use_lbfgs:
                 def closure():
