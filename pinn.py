@@ -70,15 +70,15 @@ class SubPINN(nn.Module):
     If hard IC is enabled: u(x,t) = IC(x) + t * NN(x,t)
     Otherwise: u(x,t) = NN(x,t)
     """
-    def __init__(self, width=64, depth=3, fourier_freqs=None):
+    def __init__(self, width=64, depth=3, fourier_freqs=None, fourier_freqs_t=None):
         super().__init__()
-        # Input: [x, t] or [x, sin(k1*x), cos(k1*x), ..., t] if fourier
+        self.freqs = fourier_freqs
+        self.freqs_t = fourier_freqs_t
+        in_dim = 2  # x + t base
         if fourier_freqs is not None:
-            self.freqs = fourier_freqs  # list of frequencies
-            in_dim = 1 + 2 * len(fourier_freqs) + 1  # x + fourier pairs + t
-        else:
-            self.freqs = None
-            in_dim = 2
+            in_dim += 2 * len(fourier_freqs)
+        if fourier_freqs_t is not None:
+            in_dim += 2 * len(fourier_freqs_t)
         layers = [nn.Linear(in_dim, width), nn.Tanh()]
         for _ in range(depth - 1):
             layers += [nn.Linear(width, width), nn.Tanh()]
@@ -90,15 +90,17 @@ class SubPINN(nn.Module):
         self._ic_fn = ic_fn
 
     def forward(self, x, t):
+        feat = [x]
         if self.freqs is not None:
-            feat = [x]
             for k in self.freqs:
                 feat.append(torch.sin(k * x))
                 feat.append(torch.cos(k * x))
-            feat.append(t)
-            inp = torch.cat(feat, dim=1)
-        else:
-            inp = torch.cat([x, t], dim=1)
+        feat.append(t)
+        if self.freqs_t is not None:
+            for k in self.freqs_t:
+                feat.append(torch.sin(k * t))
+                feat.append(torch.cos(k * t))
+        inp = torch.cat(feat, dim=1)
         raw = self.net(inp)
         if self._ic_fn is not None:
             return self._ic_fn(x) + t * raw
@@ -139,7 +141,7 @@ def train():
 
     n_windows = 3 if args.problem == 'allen_cahn' else 5
     t_boundaries = [i / n_windows for i in range(n_windows + 1)]
-    time_per_window = BUDGET_SECONDS / n_windows
+    window_times = [BUDGET_SECONDS / n_windows] * n_windows
 
     models = []
     global_deadline = time.time() + BUDGET_SECONDS
@@ -151,10 +153,12 @@ def train():
         dt = t_hi_w - t_lo_w
 
         if args.problem == 'allen_cahn':
-            freqs = [math.pi, 2*math.pi, 4*math.pi, 8*math.pi]
-            sub_model = SubPINN(width=112, depth=2, fourier_freqs=freqs).double().to(DEVICE)
+            freqs_x = [math.pi, 2*math.pi, 4*math.pi, 8*math.pi]
+            sub_model = SubPINN(width=96, depth=2, fourier_freqs=freqs_x).double().to(DEVICE)
+            DTYPE = torch.float64
         else:
             sub_model = SubPINN(width=64, depth=3).double().to(DEVICE)
+            DTYPE = torch.float64
 
         # Set hard IC function (Allen-Cahn only)
         if USE_HARD_IC:
@@ -171,70 +175,91 @@ def train():
                     lambda x, _p=prev: _p(x, torch.ones(x.shape[0], 1, device=x.device, dtype=x.dtype))
                 )
 
-        lr = 5e-3 if args.problem == 'allen_cahn' else 1e-3
+        lr = 5e-3 if args.problem == 'allen_cahn' else 3e-3
         optimizer = torch.optim.Adam(sub_model.parameters(), lr=lr)
 
-        window_deadline = time.time() + time_per_window
+        window_start = time.time()
+        window_deadline = window_start + window_times[wi]
+        lbfgs_start = window_start + 0.7 * window_times[wi]  # Switch at 70%
+        use_lbfgs = False
 
         while time.time() < min(window_deadline, global_deadline):
+            # Switch to L-BFGS after 70% of window time
+            if not use_lbfgs and time.time() >= lbfgs_start:
+                use_lbfgs = True
+                optimizer = torch.optim.LBFGS(
+                    sub_model.parameters(), lr=1.0, max_iter=20,
+                    history_size=50, line_search_fn='strong_wolfe'
+                )
+
             # Sample points (order matters for RNG reproducibility)
             n_pts = 2000
-            x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi).requires_grad_(True)
-            t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1).requires_grad_(True)
+            x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi).requires_grad_(True)
+            t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1).requires_grad_(True)
 
             n_ic = 300
-            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=torch.float64).uniform_(x_lo, x_hi)
-            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=torch.float64)
+            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
+            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=DTYPE)
 
             n_bc = 100
-            t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=torch.float64).uniform_(0, 1)
-            x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE, dtype=torch.float64).requires_grad_(True)
-            x_right = torch.full((n_bc, 1), x_hi, device=DEVICE, dtype=torch.float64).requires_grad_(True)
+            t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
+            x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE, dtype=DTYPE).requires_grad_(True)
+            x_right = torch.full((n_bc, 1), x_hi, device=DEVICE, dtype=DTYPE).requires_grad_(True)
 
-            # IC loss (soft IC for Convection only)
-            if not USE_HARD_IC:
-                if wi == 0:
-                    if args.problem == 'convection':
-                        u_ic_true = torch.sin(x_ic).double()
+            def compute_loss():
+                # IC loss (soft IC for Convection only)
+                if not USE_HARD_IC:
+                    if wi == 0:
+                        if args.problem == 'convection':
+                            u_ic_true = torch.sin(x_ic).double()
+                        else:
+                            u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
                     else:
-                        u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
+                        with torch.no_grad():
+                            t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=DTYPE)
+                            u_ic_true = models[-1](x_ic, t_prev_end)
+
+                    u_ic_pred = sub_model(x_ic, t_ic)
+                    loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
+
+                # Periodic BC
+                u_left  = sub_model(x_left, t_bc)
+                u_right = sub_model(x_right, t_bc)
+                loss_bc = ((u_left - u_right)**2).mean()
+
+                # PDE residual
+                u_f = sub_model(x_f, t_f)
+                u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
+                                                create_graph=True)[0]
+                u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
+                                          create_graph=True)[0]
+
+                if args.problem == 'convection':
+                    residual = u_t_local / dt + 50.0 * u_x
                 else:
-                    with torch.no_grad():
-                        t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=torch.float64)
-                        u_ic_true = models[-1](x_ic, t_prev_end)
+                    u_xx = torch.autograd.grad(u_x, x_f, grad_outputs=torch.ones_like(u_x),
+                                               create_graph=True)[0]
+                    residual = u_t_local / dt - 0.001**2 * u_xx + 5.0 * (u_f**3 - u_f)
 
-                u_ic_pred = sub_model(x_ic, t_ic)
-                loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
+                loss_pde = (residual**2).mean()
 
-            # Periodic BC
-            u_left  = sub_model(x_left, t_bc)
-            u_right = sub_model(x_right, t_bc)
-            loss_bc = ((u_left - u_right)**2).mean()
+                if USE_HARD_IC:
+                    return loss_bc + loss_pde
+                else:
+                    return 10.0 * loss_ic + loss_bc + loss_pde
 
-            # PDE residual
-            u_f = sub_model(x_f, t_f)
-            u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
-                                            create_graph=True)[0]
-            u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
-                                      create_graph=True)[0]
-
-            if args.problem == 'convection':
-                residual = u_t_local / dt + 50.0 * u_x
+            if use_lbfgs:
+                def closure():
+                    optimizer.zero_grad()
+                    loss = compute_loss()
+                    loss.backward()
+                    return loss
+                optimizer.step(closure)
             else:
-                u_xx = torch.autograd.grad(u_x, x_f, grad_outputs=torch.ones_like(u_x),
-                                           create_graph=True)[0]
-                residual = u_t_local / dt - 0.001**2 * u_xx + 5.0 * (u_f**3 - u_f)
-
-            loss_pde = (residual**2).mean()
-
-            if USE_HARD_IC:
-                loss = loss_bc + loss_pde
-            else:
-                loss = 10.0 * loss_ic + loss_bc + loss_pde
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                loss = compute_loss()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
             step += 1
 
         models.append(sub_model)
