@@ -212,7 +212,7 @@ def train():
 
         window_start = time.time()
         window_deadline = window_start + window_times[wi]
-        lbfgs_frac = 0.7
+        lbfgs_frac = 0.5
         lbfgs_start = window_start + lbfgs_frac * window_times[wi]
         use_lbfgs = False
 
