@@ -206,6 +206,7 @@ def train():
         if args.problem == 'allen_cahn':
             freqs_x = [math.pi, 2*math.pi, 4*math.pi, 8*math.pi]
             sub_model = SubPINN(width=96, depth=2, fourier_freqs=freqs_x).double().to(DEVICE)
+            sub_model = torch.compile(sub_model)
             DTYPE = torch.float64
         else:
             DTYPE = torch.float64
@@ -306,19 +307,26 @@ def train():
                 u_right = sub_model(x_right, t_bc)
                 loss_bc = ((u_left - u_right)**2).mean()
 
-                # PDE residual
+                # PDE residual — full FD for Allen-Cahn (enables torch.compile)
                 u_f = sub_model(x_f, t_f)
-                u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
-                                                create_graph=True)[0]
-                u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
-                                          create_graph=True)[0]
 
                 if args.problem == 'convection':
+                    u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
+                                                    create_graph=True)[0]
+                    u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
+                                              create_graph=True)[0]
                     residual = u_t_local / dt + 50.0 * u_x
                 else:
-                    u_xx = torch.autograd.grad(u_x, x_f, grad_outputs=torch.ones_like(u_x),
-                                               create_graph=True)[0]
-                    residual = u_t_local / dt - 0.001**2 * u_xx + 5.0 * (u_f**3 - u_f)
+                    # Full FD: u_t and u_xx via finite differences (no autograd)
+                    FD_HX = 0.005
+                    FD_HT = 0.001
+                    u_tp = sub_model(x_f, t_f + FD_HT)
+                    u_tm = sub_model(x_f, t_f - FD_HT)
+                    u_t_fd = (u_tp - u_tm) / (2.0 * FD_HT)
+                    u_xp = sub_model(x_f + FD_HX, t_f)
+                    u_xm = sub_model(x_f - FD_HX, t_f)
+                    u_xx_fd = (u_xp - 2.0 * u_f + u_xm) / (FD_HX * FD_HX)
+                    residual = u_t_fd / dt - 0.001**2 * u_xx_fd + 5.0 * (u_f**3 - u_f)
 
                 if USE_HARD_IC:
                     # Exponential causal weighting for Allen-Cahn
