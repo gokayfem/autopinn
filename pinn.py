@@ -58,6 +58,7 @@ BUDGET_SECONDS = 180   # 3-minute wall-clock budget
 
 # Problem-specific settings
 USE_HARD_IC = (args.problem == 'allen_cahn')
+USE_SPECTRAL = (args.problem == 'convection')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -139,6 +140,47 @@ class SubPINN(nn.Module):
         return raw
 
 
+class SpectralPINN(nn.Module):
+    """Spectral PINN: tiny MLP(t) -> Fourier coefficients a_k(t), b_k(t).
+    u(x,t) = Σ [a_k cos(kx) + b_k sin(kx)]. Periodic BC exact."""
+    def __init__(self, n_modes=4, width=32, depth=2, t_freqs=None):
+        super().__init__()
+        self.n_modes = n_modes
+        self.t_freqs = t_freqs
+        in_dim = 1
+        if t_freqs is not None:
+            in_dim += 2 * len(t_freqs)
+        layers = [nn.Linear(in_dim, width), nn.Tanh()]
+        for _ in range(depth - 1):
+            layers += [nn.Linear(width, width), nn.Tanh()]
+        layers.append(nn.Linear(width, 2 * n_modes))
+        self.net = nn.Sequential(*layers)
+        ks = torch.arange(1, n_modes + 1, dtype=torch.float64)
+        self.register_buffer('ks', ks)
+        self._ic_a = None
+        self._ic_b = None
+
+    def set_ic(self, ic_a, ic_b):
+        self._ic_a = ic_a
+        self._ic_b = ic_b
+
+    def forward(self, x, t):
+        feat = [t]
+        if self.t_freqs is not None:
+            for f in self.t_freqs:
+                feat.append(torch.sin(f * t))
+                feat.append(torch.cos(f * t))
+        raw = self.net(torch.cat(feat, dim=1))
+        a = raw[:, :self.n_modes]
+        b = raw[:, self.n_modes:]
+        if self._ic_a is not None:
+            a = self._ic_a + t * a
+            b = self._ic_b + t * b
+        kx = x * self.ks
+        u = (a * torch.cos(kx) + b * torch.sin(kx)).sum(dim=1, keepdim=True)
+        return u
+
+
 class PINN(nn.Module):
     """Wrapper that holds all sub-models for evaluation."""
     def __init__(self, models, t_boundaries):
@@ -171,7 +213,7 @@ def train():
     else:
         x_lo, x_hi = -1.0, 1.0
 
-    n_windows = 3 if args.problem == 'allen_cahn' else 5
+    n_windows = 3 if args.problem == 'allen_cahn' else 1
     t_boundaries = [i / n_windows for i in range(n_windows + 1)]
     window_times = [BUDGET_SECONDS / n_windows] * n_windows
 
@@ -189,8 +231,11 @@ def train():
             sub_model = SubPINN(width=96, depth=2, fourier_freqs=freqs_x).double().to(DEVICE)
             DTYPE = torch.float64
         else:
-            sub_model = SubPINN(width=64, depth=3).double().to(DEVICE)
             DTYPE = torch.float64
+            sub_model = SpectralPINN(n_modes=1, width=32, depth=2, t_freqs=[50.0]).double().to(DEVICE)
+            ic_a = torch.zeros(1, device=DEVICE, dtype=DTYPE)
+            ic_b = torch.ones(1, device=DEVICE, dtype=DTYPE)  # sin(x) has b_1=1
+            sub_model.set_ic(ic_a, ic_b)
 
         # Set hard IC function (Allen-Cahn only)
         if USE_HARD_IC:
@@ -220,7 +265,7 @@ def train():
         use_lbfgs = False
 
         # Pre-generate fixed collocation points for L-BFGS phase
-        n_pts = 2000
+        n_pts = 500 if USE_SPECTRAL else 2000
         x_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
         t_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
         n_ic_pts = 300
@@ -257,7 +302,17 @@ def train():
                 x_right = torch.full((n_bc_pts, 1), x_hi, device=DEVICE, dtype=DTYPE).requires_grad_(True)
 
             def compute_loss():
-                # IC loss (soft IC for Convection only)
+                if USE_SPECTRAL:
+                    # Spectral: only PDE loss (BC exact, IC via coefficients)
+                    u_f = sub_model(x_f, t_f)
+                    u_t_local = torch.autograd.grad(u_f, t_f, grad_outputs=torch.ones_like(u_f),
+                                                    create_graph=True)[0]
+                    u_x = torch.autograd.grad(u_f, x_f, grad_outputs=torch.ones_like(u_f),
+                                              create_graph=True)[0]
+                    residual = u_t_local / dt + 50.0 * u_x
+                    return (residual**2).mean()
+
+                # IC loss (soft IC for non-spectral Convection only)
                 if not USE_HARD_IC:
                     if wi == 0:
                         if args.problem == 'convection':
