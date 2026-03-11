@@ -209,6 +209,9 @@ def train():
 
         lr = 5e-3 if args.problem == 'allen_cahn' else 3e-3
         optimizer = torch.optim.Adam(sub_model.parameters(), lr=lr)
+        scheduler = None
+        if args.problem == 'allen_cahn':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=800, eta_min=lr/10)
 
         window_start = time.time()
         window_deadline = window_start + window_times[wi]
@@ -289,8 +292,8 @@ def train():
                     residual = u_t_local / dt - 0.001**2 * u_xx + 5.0 * (u_f**3 - u_f)
 
                 if USE_HARD_IC:
-                    # Causal weighting for Allen-Cahn: prioritize early t
-                    causal_w = 1.0 + 3.0 * (1.0 - t_f.detach())
+                    # Exponential causal weighting for Allen-Cahn
+                    causal_w = torch.exp(3.0 * (1.0 - t_f.detach()))
                     loss_pde = (causal_w * residual**2).mean()
                 else:
                     loss_pde = (residual**2).mean()
@@ -312,6 +315,8 @@ def train():
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
             step += 1
 
         models.append(sub_model)
