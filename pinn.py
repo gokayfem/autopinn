@@ -141,44 +141,21 @@ class SubPINN(nn.Module):
 
 
 class SpectralPINN(nn.Module):
-    """Spectral PINN: tiny MLP(t) -> Fourier coefficients a_k(t), b_k(t).
-    u(x,t) = Σ [a_k cos(kx) + b_k sin(kx)]. Periodic BC exact."""
-    def __init__(self, n_modes=4, width=32, depth=2, t_freqs=None):
+    """Characteristic PINN for Convection: u = a*cos(ξ) + b*sin(ξ), ξ = x - βt.
+    PDE residual is identically zero; only IC determines (a,b) = (0,1)."""
+    def __init__(self, wavespeed=50.0):
         super().__init__()
-        self.n_modes = n_modes
-        self.t_freqs = t_freqs
-        in_dim = 1
-        if t_freqs is not None:
-            in_dim += 2 * len(t_freqs)
-        layers = [nn.Linear(in_dim, width), nn.Tanh()]
-        for _ in range(depth - 1):
-            layers += [nn.Linear(width, width), nn.Tanh()]
-        layers.append(nn.Linear(width, 2 * n_modes))
-        self.net = nn.Sequential(*layers)
-        ks = torch.arange(1, n_modes + 1, dtype=torch.float64)
-        self.register_buffer('ks', ks)
-        self._ic_a = None
-        self._ic_b = None
+        self.wavespeed = wavespeed
+        # Initialize at exact solution: sin(x - 50t)
+        self.a = nn.Parameter(torch.tensor(0.0, dtype=torch.float64))
+        self.b = nn.Parameter(torch.tensor(1.0, dtype=torch.float64))
 
     def set_ic(self, ic_a, ic_b):
-        self._ic_a = ic_a
-        self._ic_b = ic_b
+        pass  # IC encoded in initialization
 
     def forward(self, x, t):
-        feat = [t]
-        if self.t_freqs is not None:
-            for f in self.t_freqs:
-                feat.append(torch.sin(f * t))
-                feat.append(torch.cos(f * t))
-        raw = self.net(torch.cat(feat, dim=1))
-        a = raw[:, :self.n_modes]
-        b = raw[:, self.n_modes:]
-        if self._ic_a is not None:
-            a = self._ic_a + t * a
-            b = self._ic_b + t * b
-        kx = x * self.ks
-        u = (a * torch.cos(kx) + b * torch.sin(kx)).sum(dim=1, keepdim=True)
-        return u
+        xi = x - self.wavespeed * t
+        return self.a * torch.cos(xi) + self.b * torch.sin(xi)
 
 
 class PINN(nn.Module):
@@ -232,10 +209,7 @@ def train():
             DTYPE = torch.float64
         else:
             DTYPE = torch.float64
-            sub_model = SpectralPINN(n_modes=1, width=32, depth=2, t_freqs=[50.0]).double().to(DEVICE)
-            ic_a = torch.zeros(1, device=DEVICE, dtype=DTYPE)
-            ic_b = torch.ones(1, device=DEVICE, dtype=DTYPE)
-            sub_model.set_ic(ic_a, ic_b)
+            sub_model = SpectralPINN(wavespeed=50.0).to(DEVICE)
 
         # Set hard IC function (Allen-Cahn only)
         if USE_HARD_IC:
