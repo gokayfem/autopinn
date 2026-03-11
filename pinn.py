@@ -234,7 +234,7 @@ def train():
             DTYPE = torch.float64
             sub_model = SpectralPINN(n_modes=1, width=32, depth=2, t_freqs=[50.0]).double().to(DEVICE)
             ic_a = torch.zeros(1, device=DEVICE, dtype=DTYPE)
-            ic_b = torch.ones(1, device=DEVICE, dtype=DTYPE)  # sin(x) has b_1=1
+            ic_b = torch.ones(1, device=DEVICE, dtype=DTYPE)
             sub_model.set_ic(ic_a, ic_b)
 
         # Set hard IC function (Allen-Cahn only)
@@ -265,7 +265,7 @@ def train():
         use_lbfgs = False
 
         # Pre-generate fixed collocation points for L-BFGS phase
-        n_pts = 500 if USE_SPECTRAL else 2000
+        n_pts = 750 if USE_SPECTRAL else 2000
         x_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
         t_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
         n_ic_pts = 300
