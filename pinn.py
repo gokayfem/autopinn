@@ -64,26 +64,58 @@ USE_HARD_IC = (args.problem == 'allen_cahn')
 # ARCHITECTURE
 # ══════════════════════════════════════════════════════════════════════════════
 
+class SineLayer(nn.Module):
+    """SIREN layer: sin(omega * Linear(x))"""
+    def __init__(self, in_dim, out_dim, omega=30.0, is_first=False):
+        super().__init__()
+        self.omega = omega
+        self.linear = nn.Linear(in_dim, out_dim)
+        # SIREN initialization
+        with torch.no_grad():
+            if is_first:
+                self.linear.weight.uniform_(-1.0 / in_dim, 1.0 / in_dim)
+            else:
+                bound = math.sqrt(6.0 / in_dim) / omega
+                self.linear.weight.uniform_(-bound, bound)
+
+    def forward(self, x):
+        return torch.sin(self.omega * self.linear(x))
+
+
 class SubPINN(nn.Module):
     """Small MLP for a single time window.
 
     If hard IC is enabled: u(x,t) = IC(x) + t * NN(x,t)
     Otherwise: u(x,t) = NN(x,t)
     """
-    def __init__(self, width=64, depth=3, fourier_freqs=None, fourier_freqs_t=None):
+    def __init__(self, width=64, depth=3, fourier_freqs=None, fourier_freqs_t=None,
+                 use_siren=False, omega=30.0):
         super().__init__()
         self.freqs = fourier_freqs
         self.freqs_t = fourier_freqs_t
+        self.use_siren = use_siren
         in_dim = 2  # x + t base
         if fourier_freqs is not None:
             in_dim += 2 * len(fourier_freqs)
         if fourier_freqs_t is not None:
             in_dim += 2 * len(fourier_freqs_t)
-        layers = [nn.Linear(in_dim, width), nn.Tanh()]
-        for _ in range(depth - 1):
-            layers += [nn.Linear(width, width), nn.Tanh()]
-        layers.append(nn.Linear(width, 1))
-        self.net = nn.Sequential(*layers)
+
+        if use_siren:
+            layers = [SineLayer(in_dim, width, omega=omega, is_first=True)]
+            for _ in range(depth - 1):
+                layers.append(SineLayer(width, width, omega=omega))
+            layers.append(nn.Linear(width, 1))
+            # Init output layer
+            with torch.no_grad():
+                bound = math.sqrt(6.0 / width) / omega
+                layers[-1].weight.uniform_(-bound, bound)
+            self.net = nn.Sequential(*layers)
+        else:
+            layers = [nn.Linear(in_dim, width), nn.Tanh()]
+            for _ in range(depth - 1):
+                layers += [nn.Linear(width, width), nn.Tanh()]
+            layers.append(nn.Linear(width, 1))
+            self.net = nn.Sequential(*layers)
         self._ic_fn = None
 
     def set_ic(self, ic_fn):
@@ -184,6 +216,15 @@ def train():
         lbfgs_start = window_start + lbfgs_frac * window_times[wi]
         use_lbfgs = False
 
+        # Pre-generate fixed collocation points for L-BFGS phase
+        n_pts = 2000
+        x_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
+        t_f_fixed = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
+        n_ic_pts = 300
+        x_ic_fixed = torch.empty(n_ic_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
+        n_bc_pts = 100
+        t_bc_fixed = torch.empty(n_bc_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
+
         while time.time() < min(window_deadline, global_deadline):
             # Switch to L-BFGS after 70% of window time
             if not use_lbfgs and time.time() >= lbfgs_start:
@@ -193,19 +234,24 @@ def train():
                     history_size=50, line_search_fn='strong_wolfe'
                 )
 
-            # Sample points (order matters for RNG reproducibility)
-            n_pts = 2000
-            x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi).requires_grad_(True)
-            t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1).requires_grad_(True)
-
-            n_ic = 300
-            x_ic = torch.empty(n_ic, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
-            t_ic = torch.zeros(n_ic, 1, device=DEVICE, dtype=DTYPE)
-
-            n_bc = 100
-            t_bc = torch.empty(n_bc, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
-            x_left  = torch.full((n_bc, 1), x_lo, device=DEVICE, dtype=DTYPE).requires_grad_(True)
-            x_right = torch.full((n_bc, 1), x_hi, device=DEVICE, dtype=DTYPE).requires_grad_(True)
+            if use_lbfgs:
+                # Fixed points for L-BFGS (deterministic loss)
+                x_f = x_f_fixed.detach().requires_grad_(True)
+                t_f = t_f_fixed.detach().requires_grad_(True)
+                x_ic = x_ic_fixed.detach()
+                t_ic = torch.zeros(n_ic_pts, 1, device=DEVICE, dtype=DTYPE)
+                t_bc = t_bc_fixed.detach()
+                x_left  = torch.full((n_bc_pts, 1), x_lo, device=DEVICE, dtype=DTYPE).requires_grad_(True)
+                x_right = torch.full((n_bc_pts, 1), x_hi, device=DEVICE, dtype=DTYPE).requires_grad_(True)
+            else:
+                # Random points for Adam
+                x_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi).requires_grad_(True)
+                t_f = torch.empty(n_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1).requires_grad_(True)
+                x_ic = torch.empty(n_ic_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(x_lo, x_hi)
+                t_ic = torch.zeros(n_ic_pts, 1, device=DEVICE, dtype=DTYPE)
+                t_bc = torch.empty(n_bc_pts, 1, device=DEVICE, dtype=DTYPE).uniform_(0, 1)
+                x_left  = torch.full((n_bc_pts, 1), x_lo, device=DEVICE, dtype=DTYPE).requires_grad_(True)
+                x_right = torch.full((n_bc_pts, 1), x_hi, device=DEVICE, dtype=DTYPE).requires_grad_(True)
 
             def compute_loss():
                 # IC loss (soft IC for Convection only)
@@ -217,7 +263,7 @@ def train():
                             u_ic_true = (x_ic**2 * torch.cos(math.pi * x_ic)).double()
                     else:
                         with torch.no_grad():
-                            t_prev_end = torch.ones(n_ic, 1, device=DEVICE, dtype=DTYPE)
+                            t_prev_end = torch.ones(n_ic_pts, 1, device=DEVICE, dtype=DTYPE)
                             u_ic_true = models[-1](x_ic, t_prev_end)
 
                     u_ic_pred = sub_model(x_ic, t_ic)
