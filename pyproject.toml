@@ -17,6 +17,7 @@ constraint-dependencies = [
     "pillow>=13.0.0",
     "filelock>=4.2.1",
     "fsspec>=2026.6.0",
+    "setuptools>=84.1.0",
 ]
 
 [tool.uv.sources]
