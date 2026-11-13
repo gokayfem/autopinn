@@ -89,7 +89,7 @@ on Allen-Cahn. The agent's job is to close it.
 
 ## Setup
 
-Requirements: a single NVIDIA GPU, Python 3.10+, uv.
+Requirements: a single NVIDIA GPU, Python 3.11+, uv.
 
 ```bash
 # 1. Install uv (if needed)
